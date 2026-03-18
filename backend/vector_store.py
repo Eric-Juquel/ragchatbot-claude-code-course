@@ -137,22 +137,22 @@ class VectorStore:
         import json
 
         course_text = course.title
-        
+
         # Build lessons metadata and serialize as JSON string
         lessons_metadata = []
         for lesson in course.lessons:
             lessons_metadata.append({
                 "lesson_number": lesson.lesson_number,
                 "lesson_title": lesson.title,
-                "lesson_link": lesson.lesson_link
+                "lesson_link": lesson.lesson_link or ""  # ChromaDB rejects None
             })
-        
+
         self.course_catalog.add(
             documents=[course_text],
             metadatas=[{
                 "title": course.title,
-                "instructor": course.instructor,
-                "course_link": course.course_link,
+                "instructor": course.instructor or "",      # ChromaDB rejects None
+                "course_link": course.course_link or "",   # ChromaDB rejects None
                 "lessons_json": json.dumps(lessons_metadata),  # Serialize as JSON string
                 "lesson_count": len(course.lessons)
             }],
@@ -163,11 +163,11 @@ class VectorStore:
         """Add course content chunks to the vector store"""
         if not chunks:
             return
-        
+
         documents = [chunk.content for chunk in chunks]
         metadatas = [{
             "course_title": chunk.course_title,
-            "lesson_number": chunk.lesson_number,
+            "lesson_number": chunk.lesson_number if chunk.lesson_number is not None else -1,  # ChromaDB rejects None
             "chunk_index": chunk.chunk_index
         } for chunk in chunks]
         # Use title with chunk index for unique IDs
@@ -246,6 +246,24 @@ class VectorStore:
             print(f"Error getting course link: {e}")
             return None
     
+    def get_course_outline(self, course_name: str) -> Optional[Dict[str, Any]]:
+        """Get the full course outline (title, link, instructor, lesson list) for a course"""
+        import json
+        resolved = self._resolve_course_name(course_name)
+        if not resolved:
+            return None
+        results = self.course_catalog.get(ids=[resolved])
+        if not (results and results.get('metadatas') and results['metadatas']):
+            return None
+        meta = results['metadatas'][0]
+        lessons = json.loads(meta.get('lessons_json', '[]'))
+        return {
+            "title": meta.get('title'),
+            "course_link": meta.get('course_link'),
+            "instructor": meta.get('instructor'),
+            "lessons": lessons
+        }
+
     def get_lesson_link(self, course_title: str, lesson_number: int) -> Optional[str]:
         """Get lesson link for a given course title and lesson number"""
         import json
