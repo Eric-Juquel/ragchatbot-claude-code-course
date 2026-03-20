@@ -5,7 +5,11 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from pydantic import BaseModel
+from typing import Any, Dict, List, Optional
 from models import Course, Lesson, CourseChunk
 from vector_store import VectorStore
 
@@ -73,3 +77,70 @@ def mock_rag_config(tmp_path):
     config.CHUNK_SIZE = 800
     config.CHUNK_OVERLAP = 100
     return config
+
+
+# ---------------------------------------------------------------------------
+# API fixtures — a minimal FastAPI app that mirrors app.py endpoints
+# without mounting static files (which don't exist in the test environment).
+# ---------------------------------------------------------------------------
+
+class _QueryRequest(BaseModel):
+    query: str
+    session_id: Optional[str] = None
+
+
+class _QueryResponse(BaseModel):
+    answer: str
+    sources: List[Dict[str, Any]]
+    session_id: str
+
+
+class _CourseStats(BaseModel):
+    total_courses: int
+    course_titles: List[str]
+
+
+@pytest.fixture
+def mock_rag_system():
+    """Pre-configured MagicMock that mimics RAGSystem's public interface."""
+    rag = MagicMock()
+    rag.session_manager.create_session.return_value = "test-session-id"
+    rag.query.return_value = ("Mocked answer", [{"title": "Test Course", "url": "https://example.com"}])
+    rag.get_course_analytics.return_value = {
+        "total_courses": 2,
+        "course_titles": ["Python Basics", "Advanced FastAPI"],
+    }
+    return rag
+
+
+@pytest.fixture
+def api_client(mock_rag_system):
+    """TestClient for a minimal FastAPI app that mirrors app.py without static files."""
+    test_app = FastAPI()
+
+    @test_app.post("/api/query", response_model=_QueryResponse)
+    async def query_documents(request: _QueryRequest):
+        try:
+            session_id = request.session_id or mock_rag_system.session_manager.create_session()
+            answer, sources = mock_rag_system.query(request.query, session_id)
+            return _QueryResponse(answer=answer, sources=sources, session_id=session_id)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @test_app.delete("/api/session/{session_id}")
+    async def delete_session(session_id: str):
+        mock_rag_system.session_manager.clear_session(session_id)
+        return {"status": "cleared"}
+
+    @test_app.get("/api/courses", response_model=_CourseStats)
+    async def get_course_stats():
+        try:
+            analytics = mock_rag_system.get_course_analytics()
+            return _CourseStats(
+                total_courses=analytics["total_courses"],
+                course_titles=analytics["course_titles"],
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    return TestClient(test_app)
