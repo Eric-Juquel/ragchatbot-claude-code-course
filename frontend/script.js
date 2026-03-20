@@ -1,6 +1,12 @@
 // API base URL - use relative path to work from any host
 const API_URL = '/api';
 
+// Theme management
+(function initTheme() {
+    const saved = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', saved);
+})();
+
 // Global state
 let currentSessionId = null;
 
@@ -21,6 +27,32 @@ document.addEventListener('DOMContentLoaded', () => {
     loadCourseStats();
 
     document.getElementById('newChatBtn').addEventListener('click', createNewSession);
+
+    // Theme toggle
+    const themeToggle = document.getElementById('themeToggle');
+
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('theme', theme);
+        themeToggle.setAttribute(
+            'aria-label',
+            theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
+        );
+    }
+
+    // Sync aria-label with the theme that was restored on page load
+    applyTheme(document.documentElement.getAttribute('data-theme') || 'dark');
+
+    themeToggle.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme') || 'dark';
+        applyTheme(current === 'dark' ? 'light' : 'dark');
+
+        // Trigger icon swap animation
+        themeToggle.classList.add('toggling');
+        themeToggle.addEventListener('animationend', () => {
+            themeToggle.classList.remove('toggling');
+        }, { once: true });
+    });
 });
 
 // Event Listeners
